@@ -6,7 +6,13 @@ coupled_channel
 
 [![Binder](https://mybinder.org/badge_logo.svg)](https://mybinder.org/v2/gh/AleksiNummelin/coupled_channel/HEAD)
 
-Coupled 1D atmosphere-ocean-sea ice channel model
+Coupled 1D atmosphere-ocean-sea ice channel model.
+
+Once the binder launches switch the /tree to /lab in the url to get jupyterlab. Open terminal and run
+
+```
+$ python setup.py develop
+```
 
 --------
 
