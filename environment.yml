@@ -7,10 +7,6 @@ dependencies:
   # Examples (remove and add as needed)
   - jupyter
   - jupyterlab
-  - xarray
   - numpy
-  - numba
   - scipy
-  - scikit-learn 
-  - netcdf4
   - matplotlib
