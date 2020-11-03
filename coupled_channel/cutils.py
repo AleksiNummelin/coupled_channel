@@ -1,4 +1,4 @@
-from numba import jit
+#from numba import jit
 import numpy as np
 #from joblib import Parallel, delayed, parallel_backend
 #from joblib import load, dump
@@ -19,10 +19,9 @@ def set_model_constants(xx=50.E3,nx=100,va=10.,tmax=60*360*24*3600.,avep=24*3600
     C['va']    = va #wind in m/s
     #
     C['tmax']  = tmax #tmax seconds
-    C['dt']    = dt #np.floor(np.min([(xx/va)/4,avep])) #adjust the timestep
-    #C['dt']=#avep//(avep//C['dt'])
-    #print(C['dt'])
-    C['avep']   = avep #averaging period in seconds - daily average 
+    C['dt']    = dt #timestep
+    #
+    C['avep']   = avep #averaging period in seconds 
     #
     C['period'] = period #period of sinus forcing - only for ocean forcing
     C['Cs']     = Cs #exchange coefficient for bulk formula
@@ -52,7 +51,7 @@ def set_model_constants(xx=50.E3,nx=100,va=10.,tmax=60*360*24*3600.,avep=24*3600
     #
     return C
 
-@jit(nopython=True)
+#@jit(nopython=True)
 def CoupledChannel_time(nt,nx,xx,dt,avep,sst,tas,hice,sst_boundary,sst_out,tas_out,hice_out,sflx_f_out,sflx_out,forcing,spatial_pattern,ra,Cp,va,vo,Da,Do,Cs,T0,Tf,emissivity,SW0,SW_anom,H,Hb,Cpo,ro,tau_entrainment,Li,ri,use_ocn_tendencies,use_atm_tendencies, atm_DA_tendencies, ocn_DA_tendencies,ice_model,atm_adv,return_coupled_fluxes):
     '''
     Separate time loop to enable numba
@@ -285,7 +284,7 @@ def CoupledChannel2(C,forcing, dt_f=30*24*3600, ocn_mixing_ratio=0, restoring=Fa
     else:
         return tas_out, sst_out, hice_out, sflx_out, sflx_f_out, nt1, nt    
         
-def CoupledChannel(C,forcing, dt_f=30*24*3600, ocn_mixing_ratio=0, restoring=False,ice_model=True,atm_adv=True,spatial_pattern=None,atm_DA_tendencies=None,ocn_DA_tendencies=None, return_coupled_fluxes=False,random_amp=0.1):
+def CoupledChannel(C,forcing, sst_boundary=None, dt_f=30*24*3600, restoring=False,ice_model=True,atm_adv=True,spatial_pattern=None,atm_DA_tendencies=None,ocn_DA_tendencies=None, return_coupled_fluxes=False,random_amp=0.1):
     '''
     This is the main function for the coupled ocean--atm channel model.
     
@@ -298,39 +297,38 @@ def CoupledChannel(C,forcing, dt_f=30*24*3600, ocn_mixing_ratio=0, restoring=Fal
     dt_f: timestep of the forcing
     atm_adv: boolean, advective atmosphere
     atm_ocn: boolean, advective ocean
-    ocn_mixing: add non-local mixing to ocean
-    ocn_mixing_ratio: 0-1 ratio between advection and mixing (0 only advection; 1 only mixing)
-    
     '''
     #
-    #print(C)
-    #print(C['T0'],C['SW0'],C['Da'],C['xx'])
+    # number of simulation timesteps and output timesteps
+    nt   = int(C['tmax']/C['dt'])   #simulation
+    nt1  = int(C['tmax']/C['avep']) #output
+    # tau  = C['period']/C['dt'] #this is period/dt, previously nt/8 
+    # rtas = np.random.rand(C['nx'])
+    # intitialize the model variables, first dimension is due to 2 timesteps deep scheme
+    sst  = C['T0']*np.ones((2,C['nx']))
+    tas  = C['T0']*np.ones((2,C['nx'])) #+rtas
+    hice = np.zeros((2,C['nx']))
+    # If boundary conditions are not defined, then set initially to T0
+    if np.all(sst_boundary==None):
+        sst_boundary=C['T0']*np.ones((2,nt+1)) #nt+1
+        evolve_boundary=True
+    else:
+        sst_boundary=np.concatenate((sst_boundary[np.newaxis,],sst_boundary[np.newaxis,]),axis=0)
+        evolve_boundary=False
     #
-    nt=int(C['tmax']/C['dt']) #steps
-    nt1=C['tmax']//C['avep']
-    tau=C['period']/C['dt'] #this is period/dt, previously nt/8 
-    rtas=np.random.rand(C['nx'])
-    #print(rtas.max())
-    #intitialize the model variables, only 2 timesteps deep scheme
-    sst=C['T0']*np.ones((2,C['nx']))
-    tas=C['T0']*np.ones((2,C['nx']))+rtas
-    hice=np.zeros((2,C['nx']))
-    sst_boundary=C['T0']*np.ones((2))
-    #
-    #print(sst.max(),tas.max())
-    #interpolate forcing to the new timescale
+    # interpolate forcing to the new timescale
     if np.all(forcing!=None):
         forcing = np.interp(np.arange(0,len(forcing)*dt_f,C['dt']),np.arange(0,len(forcing)*dt_f,dt_f),forcing)
     else:
         forcing = np.zeros(nt+1)
     #
-    #initialize outputs
+    # initialize outputs
     sst_out    = np.zeros((nt1,C['nx']))
     tas_out    = np.zeros((nt1,C['nx']))
     hice_out   = np.zeros((nt1,C['nx']))
     sflx_f_out = np.zeros((nt1,C['nx'])) #forcing
     sflx_out   = np.zeros((nt1,C['nx']))
-    #spatial pattern of the forcing - assume a sine wave
+    # spatial pattern of the forcing - assume a sine wave
     if np.all(spatial_pattern==None):
           spatial_pattern=np.ones(C['nx'])
     #
@@ -347,7 +345,7 @@ def CoupledChannel(C,forcing, dt_f=30*24*3600, ocn_mixing_ratio=0, restoring=Fal
         atm_DA_tendencies = np.zeros((nt,C['nx']))
         ocn_DA_tendencies = np.zeros((nt,C['nx']))
 
-    #initialize counters
+    # initialize counters
     c=0; c2=0; c3=0; n=1
     #####################
     #  --- TIME LOOP ---
@@ -366,67 +364,81 @@ def CoupledChannel(C,forcing, dt_f=30*24*3600, ocn_mixing_ratio=0, restoring=Fal
         sflx=sflx+C['ra']*C['Cp']*C['va']*C['Cs']*(sst[n-1,:]-tas[n-1,:])
         # RADIATIVE FLUXES - LW will cool the atmosphere, SW will warm the ocean
         LW_cooling = C['emissivity']*5.67E-8*(tas[n-1,:]**4)
-        SW_warming = C['SW0']+np.max(C['SW_anom']*np.sin(2*nn*C['dt']*np.pi/(360*24*3600)),0)
+        SW_warming = np.max(C['SW0']-C['SW_anom']*np.cos(2*np.pi*(nn*C['dt'])/(360*24*3600)),0) #SW must always be positive
         #net_radiation = SW_warming-LW_cooling 
         net_radiation = -LW_cooling
         #
         # OCEAN BOUNDARY CONDITION - SET dT to zero to suppress the sin
-        sst_boundary[n]=sst_boundary[n-1]+SW_warming[0]*C['dt']/(C['H']*C['Cpo']*C['ro'])-C['emissivity']*5.67E-8*(sst_boundary[n-1]**4)*C['dt']/(C['H']*C['Cpo']*C['ro'])+(C['T0']-sst_boundary[n-1])*C['dt']/(360*24*3600) #C['T0']+C['dT']*np.sin(nn*C['dt']*np.pi/C['period']) + 
+        if evolve_boundary:
+            sst_boundary_tendency=SW_warming[0]*C['dt']/(C['H']*C['Cpo']*C['ro'])-C['emissivity']*5.67E-8*(sst_boundary[n-1,nn]**4)*C['dt']/(C['H']*C['Cpo']*C['ro'])+(C['T0']-sst_boundary[n-1,nn])*C['dt']/(360*24*3600) #C['T0']+C['dT']*np.sin(nn*C['dt']*np.pi/C['period']) + 
+            sst_boundary[0,nn+1]=sst_boundary[0,nn]+sst_boundary_tendency
+        ############################################
+        # 
+        #              ATMOSPHERE
         #
-        # ATMOSPHERE - ADVECTION AND DIFFUSION
-        # set atm_adv=False is no atmospheric advection - note that we need to know the wind speed to resolve heat fluxes
+        ############################################
+        #
+        # ADVECTION
+        #
+        # set atm_adv=False is no atmospheric advection - note that we still need to know the wind speed to resolve heat fluxes
         if atm_adv:
-            a_adv = np.concatenate([sst_boundary[n-1]-tas[n-1,:1],tas[n-1,:-1]-tas[n-1,1:]],axis=0)*(C['va']*C['dt']/C['xx'])
-            #tas[n,0]=tas[n-1,0]+(C['T0']-tas[n-1,0])*(C['va']*C['dt']/C['xx']) #always constant temperature blowing over the ocean from land
-            #tas[n,0]=tas[n-1,0]+(sst[n,0]-tas[n-1,0])*(C['va']*C['dt']/C['xx']) #atmospheric temperature at the boundary is in equilibrium with the ocean
-            #tas[n,1:]=tas[n-1,1:]+(tas[n-1,:-1]-tas[n-1,1:])*(C['va']*C['dt']/C['xx'])
+            a_adv = np.concatenate([sst_boundary[n-1,nn]-tas[n-1,:1],tas[n-1,:-1]-tas[n-1,1:]],axis=0)*(C['va']*C['dt']/C['xx'])
         else:
-            #tas[n,:]  = tas[n-1,0]
             a_adv = 0 
         #
         # DIFFUSION
         # 
-        #tas[n,1:-1] = tas[n,1:-1] + (tas[n-1,2:]+tas[n-1,:-2]-2*tas[n-1,1:-1])*(C['Da']*C['dt']/(C['xx']**2))
         a_diff  = (tas[n-1,2:]+tas[n-1,:-2]-2*tas[n-1,1:-1])*(C['Da']*C['dt']/(C['xx']**2))
-        a_diff0 = (tas[n-1,1]+sst_boundary[n-1]-2*tas[n-1,0])*(C['Da']*C['dt']/(C['xx']**2))
+        a_diff0 = (tas[n-1,1]+sst_boundary[n-1,nn]-2*tas[n-1,0])*(C['Da']*C['dt']/(C['xx']**2))
         a_diff  = np.concatenate([np.array([a_diff0]),a_diff,a_diff[-1:]],axis=0)
         #
-        # ATMOSPHERE - SURFACE FLUXES
+        # SURFACE FLUXES
         #
         a_netsflx = (sflx*C['dt'])/(C['Hb']*C['Cp']*C['ra']) + net_radiation*C['dt']/(C['Hb']*C['Cp']*C['ra'])
         #
-        # full update
-        #
         #
         if return_coupled_fluxes:
-            atm_DA_tendencies[nn,:]=a_adv + a_diff
+            atm_DA_tendencies[nn,:] = a_adv + a_diff
+        #
+        # ATM UPDATE
         #
         if use_atm_tendencies:
             tas[n,:] = tas[n-1,:] + a_netsflx + atm_DA_tendencies[c3,:]
         else:
             tas[n,:] = tas[n-1,:] + a_netsflx + a_adv + a_diff
         #
-        # OCEAN - ADVECTION AND DIFFUSION + ENTRAINMENT
-        # ocean advection
-        # set vo=0 for stagnant ocean (slab)
-        #
-        #sst[n,1:] = sst[n-1,1:]+(sst[n-1,:-1]-sst[n-1,1:])*(1-ocn_mixing_ratio)*(C['vo']*C['dt']/C['xx'])+(C['T0']-sst[n-1,1:])*ocn_mixing_ratio*(C['vo']*C['dt']/C['xx'])
-        o_adv = np.concatenate([sst_boundary[n-1]-sst[n-1,:1],sst[n-1,:-1]-sst[n-1,1:]],axis=0)*(C['vo']*C['dt']/C['xx'])
-        # DIFFUSION
-        #sst[n,1:-1] = sst[n,1:-1] + (sst[n-1,2:]+sst[n-1,:-2]-2*sst[n-1,1:-1])*(C['Do']*C['dt']/(C['xx']**2))
-        o_diff = (sst[n-1,2:]+sst[n-1,:-2]-2*sst[n-1,1:-1])*(C['Do']*C['dt']/(C['xx']**2))
-        o_diff0 = (sst[n-1,1]+sst_boundary[n-1]-2*sst[n-1,0])*(C['Do']*C['dt']/(C['xx']**2))
-        o_diff = np.concatenate([np.array([o_diff0]),o_diff,o_diff[-1:]],axis=0)
-        # ENTRAINMENT (damping by a lower layer)
-        o_entrain = (C['T0']-sst[n-1,:])*C['dt']/C['tau_entrainment']
-        #sst[n,1:]=sst[n,1:]+(C['T0']-sst[n-1,1:])*C['dt']/C['tau_entrainment']
+        ################################################
         # 
-        # OCEAN - SURFACE FLUXES        
+        #                  OCEAN 
+        #
+        ################################################
+        #  AND DIFFUSION + ENTRAINMENT
+        # ocean advection
+        # 
+        # ADVECTION set vo=0 for stagnant ocean (slab)
+        #
+        o_adv = np.concatenate([sst_boundary[n-1,nn]-sst[n-1,:1],sst[n-1,:-1]-sst[n-1,1:]],axis=0)*(C['vo']*C['dt']/C['xx'])
+        #
+        # DIFFUSION
+        #
+        o_diff = (sst[n-1,2:]+sst[n-1,:-2]-2*sst[n-1,1:-1])*(C['Do']*C['dt']/(C['xx']**2))
+        o_diff0 = (sst[n-1,1]+sst_boundary[n-1,nn]-2*sst[n-1,0])*(C['Do']*C['dt']/(C['xx']**2))
+        o_diff = np.concatenate([np.array([o_diff0]),o_diff,o_diff[-1:]],axis=0)
+        #
+        # ENTRAINMENT - RESTORING TO AN AMBIENT WATER MASS (CAN BE SEEN AS LATERAL OR VERTICAL MIXING)
+        # set tau_entrainment=0 for no entrainment
+        if C['tau_entrainment']>0:
+            o_entrain = (C['T0']-sst[n-1,:])*C['dt']/C['tau_entrainment']
+        else:
+            o_entrain = 0
+        # 
+        # SURFACE FLUXES        
         #
         o_netsflx = -sflx*C['dt']/(C['H']*C['Cpo']*C['ro'])+SW_warming*C['dt']/(C['H']*C['Cpo']*C['ro'])
-        #sst[n,:]=sst[n,:]-(sflx*C['dt'])/(C['H']*C['Cpo']*C['ro'])
+        #
         if return_coupled_fluxes:
             ocn_DA_tendencies[nn,:] = o_adv + o_diff + o_entrain
+        #
         # OCN update
         if use_ocn_tendencies:
             sst[n,:] = sst[n-1,:] + o_netsflx + ocn_DA_tendencies[c3,:]
@@ -436,11 +448,13 @@ def CoupledChannel(C,forcing, dt_f=30*24*3600, ocn_mixing_ratio=0, restoring=Fal
         if ice_model:
             # THIS IS A DIAGNOSTIC SEA ICE MODEL
             # 
-            # sst is first allowed to cool below freezing and then we forM sea ice from the excess_freeze 
-            # i.e the amount that heat that is used to cool sst below freezing is converted to ice instead
-            # similarly sst is allowed to warm above Tf even if there is ice, and then excess_melt, 
+            # SST is first allowed to cool below freezing and then we form sea ice from the excess_freeze 
+            # i.e the amount that heat that is used to cool SST below freezing is converted to ice instead.
+            # Similarly, SST is allowed to warm above Tf even if there is ice, and then excess_melt, 
             # i.e. the amount of heat that is used to warm the water is first used to melt ice, 
-            # and then the rest can warm water. This scheme conserves energy - it simply switches it between ocean and ice
+            # and then the rest can warm the water.
+            #
+            # This scheme conserves energy - it simply switches it between ocean and ice storages
             #
             ice_mask = (hice[n-1,:]>0).astype(np.float) #cells where there is ice to melt
             freezing_mask = (sst[n,:]<C['Tf']).astype(np.float) #cells where freezing will happen
@@ -474,7 +488,7 @@ def CoupledChannel(C,forcing, dt_f=30*24*3600, ocn_mixing_ratio=0, restoring=Fal
         #############################
         # ---   PREPARE OUTPUT ----
         #############################
-        #accumulate
+        # accumulate output
         tas_out[c,:]  = tas_out[c,:]+tas[n,:]
         sst_out[c,:]  = sst_out[c,:]+sst[n,:]
         hice_out[c,:] = hice_out[c,:]+hice[n,:]
@@ -501,8 +515,10 @@ def CoupledChannel(C,forcing, dt_f=30*24*3600, ocn_mixing_ratio=0, restoring=Fal
         tas[0,:]  = tas[1,:].copy()
         sst[0,:]  = sst[1,:].copy()
         hice[0,:] = hice[1,:].copy()
-        sst_boundary[0]=sst_boundary[1].copy()
+        # figure this out - should this be just directly applied to n-1 at the top?
         #
+        #
+    # if there is no ice, set to nan
     hice_out[np.where(hice_out==0)]=np.nan
     #
     if return_coupled_fluxes:
