@@ -232,8 +232,8 @@ def CoupledChannel(C,forcing, T_boundary=None, dt_f=30*24*3600, restoring=False,
             #hice[n-1,:-1] = hice[n-1,:-1] -dhice
             #hice[n-1,-1]  = hice[n-1,-1] + dhice[-1]
             #
-            ice_mask = (hice[n-1,:]>0).astype(np.float) #cells where there is ice to melt
-            freezing_mask = (sst[n,:]<C['Tf']).astype(np.float) #cells where freezing will happen
+            ice_mask = (hice[n-1,:]>0).astype(float) #cells where there is ice to melt
+            freezing_mask = (sst[n,:]<C['Tf']).astype(float) #cells where freezing will happen
             # change in energy
             dEdt = C['H']*C['ro']*C['Cpo']*(sst[n,:]-sst[n-1,:])/C['dt']
             # negative change in energy will produce ice whenver the water would otherwise cool below freezing
@@ -248,7 +248,7 @@ def CoupledChannel(C,forcing, T_boundary=None, dt_f=30*24*3600, restoring=False,
             # update
             hice[n,:]     = hice[n-1,:] + dhice_freeze - dhice_melt
             # check how much energy was used for melting sea ice - remove this energy from ocean
-            hice_melt = (dhice_melt>0).astype(np.float)*np.min([dhice_melt,hice[n-1,:]],axis=0)
+            hice_melt = (dhice_melt>0).astype(float)*np.min([dhice_melt,hice[n-1,:]],axis=0)
             # Do not allow ice to be negative - that energy is kept in the ocean all the time. 
             # The line above ensures that not more energy than is needed to melt the whole ice cover
             # is removed from the ocean at any given time
@@ -404,8 +404,8 @@ def CoupledChannel_time(nt,nx,xx,dt,avep,sst,tas,hice,sst_boundary,sst_out,tas_o
             # i.e. the amount of heat that is used to warm the water is first used to melt ice, 
             # and then the rest can warm water. This scheme conserves energy - it simply switches it between ocean and ice
             #
-            ice_mask = (hice[n-1,:]>0).astype(np.float) #cells where there is ice to melt
-            freezing_mask = (sst[n,:]<Tf).astype(np.float) #cells where freezing will happen
+            ice_mask = (hice[n-1,:]>0).astype(float) #cells where there is ice to melt
+            freezing_mask = (sst[n,:]<Tf).astype(float) #cells where freezing will happen
             # change in energy
             dEdt = H*ro*Cpo*(sst[n,:]-sst[n-1,:])/dt
             # negative change in energy will produce ice whenver the water would otherwise cool below freezing
@@ -420,7 +420,7 @@ def CoupledChannel_time(nt,nx,xx,dt,avep,sst,tas,hice,sst_boundary,sst_out,tas_o
             # update
             hice[n,:]     = hice[n-1,:] + dhice_freeze - dhice_melt
             # check how much energy was used for melting sea ice - remove this energy from ocean
-            hice_melt = (dhice_melt>0).astype(np.float)*np.min([dhice_melt,hice[n-1,:]],axis=0)
+            hice_melt = (dhice_melt>0).astype(float)*np.min([dhice_melt,hice[n-1,:]],axis=0)
             # Do not allow ice to be negative - that energy is kept in the ocean all the time. 
             # The line above ensures that not more energy than is needed to melt the whole ice cover
             # is removed from the ocean at any given time
